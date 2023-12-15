@@ -1,0 +1,9 @@
+TRAIN_DATASET_PATH: /home/gradevski/Projects/openie-exploration/data/datasets/train_full.json
+VAL_DATASET_PATH: /home/gradevski/Projects/openie-exploration/data/datasets/val_full.json
+TEST_DATASET_PATH: /home/gradevski/Projects/openie-exploration/data/datasets/test_full.json
+NUM_WORKERS: 2
+EXPERIMENT_PATH: /home/gradevski/Projects/openie-exploration/experiments/slot-linking-baseline
+TRAIN_GRAPH_PATH: /home/gradevski/Projects/openie-exploration/data/biggraph-wikidata/
+WIKIDATA_PATH: /home/gradevski/Projects/openie-exploration/data/wikidata
+MODEL_NAME: "slot-linker"
+EMBED_DIM: 200

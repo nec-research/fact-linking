@@ -1,0 +1,8 @@
+.vscode
+data/
+models/
+notebooks/
+__pycache__/
+.DS_Store
+experiments/
+scripts/
