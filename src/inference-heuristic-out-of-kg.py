@@ -1,6 +1,6 @@
 #          Linking Surface Facts to Large-Scale Knowledge Graphs
 #
-#   file: wikidata.py
+#   file: inference-heuristic-out-of-kg.py
 #
 # Authors: Gorjan Radevski (gorjanradevski@gmail.com)
 #          Kiril Gashteovski (kiril.gashteovski@neclab.eu)
@@ -40,132 +40,133 @@
 # ENTIRE AGREEMENT AND AMENDMENTS: This Agreement constitutes the sole and entire agreement between Licensee and Licensor as to the matter set forth herein and supersedes any previous agreements, understandings, and arrangements between the parties relating hereto.
 #      THIS HEADER MAY NOT BE EXTRACTED OR MODIFIED IN ANY WAY.
 
-import json
-import string
-from abc import ABC, abstractmethod
+import argparse
+import logging
+import random
 from os.path import join as pjoin
 
-import indexed_gzip as igzip
-from transformers import RobertaTokenizerFast
+import torch
+from torch.utils.data import DataLoader, Subset
+from tqdm import tqdm
+from yacs.config import CfgNode
+
+from modelling.datasets import BaseCollater, BaseDataset
+from modelling.evaluators import KgPresenceEvaluator
+from modelling.indexers import FaissTextIndexer
+from modelling.kg_presence import HeuristicOoKgDetector
+from modelling.models import SlotLinkingModel
+from utils.misc import move_batch_to_device, get_dataset_entities_relations_from_loader
+from utils.setup import get_cfg_defaults
+from utils.wikidata import Wikidata, wikidata_factory
 
 
-class Wikidata(ABC):
-    @abstractmethod
-    def get_data(self, data):
-        pass
+def prepare(cfg: CfgNode):
+    logging.basicConfig(level=logging.INFO)
+    device = torch.device(cfg.DEVICE)
+    logging.info("Preparing datasets...")
+    # Preparing testing dataset
+    test_dataset = BaseDataset(cfg, mode="test")
+    if cfg.TEST_SUBSET:
+        test_indices = random.sample(range(len(test_dataset)), k=cfg.TEST_SUBSET)
+        test_dataset = Subset(test_dataset, test_indices)
+    logging.info(f"Testing dataset size: {len(test_dataset)}")
+    inference_collater = BaseCollater(cfg)
+    test_loader = DataLoader(
+        test_dataset,
+        shuffle=False,
+        batch_size=cfg.BATCH_SIZE,
+        num_workers=cfg.NUM_WORKERS,
+        collate_fn=inference_collater,
+    )
+    logging.info("Preparing Wikidata...")
+    wikidata = wikidata_factory[cfg.WIKIDATA_TYPE](wikidata_path=cfg.WIKIDATA_PATH)
 
-    @abstractmethod
-    def get_label(self, data):
-        pass
-
-    @abstractmethod
-    def get_description(self, data):
-        pass
-
-    @abstractmethod
-    def get_aliases(self, data):
-        pass
-
-
-class WikidataProcessed(Wikidata):
-    def __init__(self, wikidata_path: str, **kwargs):
-        self.wikidata = json.load(
-            open(pjoin(wikidata_path, "wikidata_processed.json"), "r")
-        )
-
-    def get_data(self, object_id: str):
-        return self.wikidata[object_id]
-
-    def get_label(self, data):
-        return data["label"]
-
-    def get_description(self, data):
-        return data["description"]
-
-    def get_aliases(self, data):
-        return data["aliases"]
+    return cfg, test_loader, wikidata, device
 
 
-class WikidataZip(Wikidata):
-    def __init__(self, wikidata_path: str, **kwargs):
-        # Load stuff
-        self.wikidata = json.load(open(pjoin(wikidata_path, "wikidata_index.json")))
-        self.zip_file = igzip.IndexedGzipFile(
-            pjoin(wikidata_path, "latest-all.json.gz"),
-            index_file=pjoin(wikidata_path, "wikidata_seek_index.gzidx"),
-        )
-        self.punc = set(string.punctuation)
-        # Used just for alias & description filtering (abnormaly long sequences)
-        self.tokenizer = RobertaTokenizerFast.from_pretrained("distilroberta-base")
-        # Hard coded, qualitatively inspected that everything longer is random
-        # characters or just bad
-        self.threshold = kwargs.pop("threshold", 30)
+def prepare_slot_linker(cfg, device):
+    model = SlotLinkingModel(cfg)
+    checkpoint = torch.load(
+        pjoin(cfg.EXPERIMENT_PATH, "model_checkpoint.pt"), map_location="cpu"
+    )
+    model.load_state_dict(checkpoint)
+    model = model.to(device)
+    model.train(False)
 
-    def get_triplet_aliases(self, fact_ids):
-        subj_id, obj_id = fact_ids[0], fact_ids[2]
-        # Get data
-        subj_data = self.get_data(subj_id)
-        obj_data = self.get_data(obj_id)
-        # Get aliases
-        subj_aliases = self.get_aliases(subj_data)
-        obj_aliases = self.get_aliases(obj_data)
-
-        return subj_aliases, obj_aliases
-
-    def get_description(self, data):
-        # data is obtained from get_data, given an entity or relation id
-        if not data:
-            return None
-        if "en" in data["descriptions"]:
-            description = data["descriptions"]["en"]["value"]
-        else:
-            description = "None"
-        # Check if abnormal tokens
-        tokenized = self.tokenizer.encode(description)
-        if len(tokenized) > self.threshold:
-            tokenized = tokenized[1 : self.threshold]
-        # Decode back to string
-        description = self.tokenizer.decode(tokenized)
-
-        return description
-
-    def get_label(self, data):
-        # data is obtained from get_data, given an entity or relation id
-        if not data:
-            return None
-        if "en" in data["labels"]:
-            label = data["labels"]["en"]["value"]
-        else:
-            label = None
-
-        return label
-
-    def get_aliases(self, data):
-        # data is obtained from get_data, given an entity or relation id
-        if not data:
-            return []
-        if "en" not in data["aliases"]:
-            return []
-        return [
-            a["value"]
-            for a in data["aliases"]["en"]
-            if all(x.isalpha() or x.isspace() or x in self.punc for x in a["value"])
-            and len(self.tokenizer.encode(a["value"])) < self.threshold
-        ]
-
-    def get_data(self, object_id: str):
-        try:
-            offset, length = self.wikidata[object_id]
-            # Seek to the location
-            self.zip_file.seek(offset)
-            # Obtain the data chunk
-            object_bytes = self.zip_file.read(length)
-            # Load the data from the byte array
-            data = json.loads(object_bytes[:-2])
-        except KeyError:
-            data = None
-
-        return data
+    return model
 
 
-wikidata_factory = {"zip": WikidataZip, "processed": WikidataProcessed}
+@torch.no_grad()
+def inference(cfg: CfgNode, test_loader: DataLoader, wikidata: Wikidata, device, args):
+    slot_linker = prepare_slot_linker(cfg, device)
+    logging.info("Preparing indexer")
+    indexer = FaissTextIndexer(cfg, wikidata=wikidata)
+    logging.info("Preparing evaluator...")
+    # KG Presence module & evaluator
+    kg_presence_module = HeuristicOoKgDetector(
+        determiner=args.determiner, threshold=args.determiner_threshold
+    )
+    kg_presence_evaluator = KgPresenceEvaluator(cfg)
+    for status in ["inside", "outside"]:
+        logging.info(f"Starting {status.upper()}-KG inference...")
+        kg_presence_evaluator.reset(status=status)
+        # If outside clean entities & relations
+        if status == "outside":
+            entities, relations = get_dataset_entities_relations_from_loader(
+                test_loader
+            )
+            indexer.remove_entities_from_index(entities)
+            indexer.remove_relations_from_index(relations)
+        # Iterate over dataset
+        for batch in tqdm(test_loader):
+            batch = move_batch_to_device(batch, device)
+            # Obtain outputs
+            oie_features = slot_linker(batch)
+            # Perform ranking with bi-encoder
+            grounding = indexer(oie_features)
+            # Check out-of-kg presence
+            kg_presence_output = kg_presence_module(grounding)
+            # Process evaluators
+            kg_presence_evaluator.process(kg_presence_output)
+        # Insides/Outside of Knowledge Graph metrics
+        logging.info(f"============= {status.upper()}-KG (Accuracies) =============")
+        metrics = kg_presence_evaluator.evaluate()
+        for slot in metrics:
+            accuracy = metrics[slot]["accuracy"]
+            error = metrics[slot]["error"]
+            logging.info(f"{slot}={accuracy} +/- {error}")
+    # Macro-average acuracies
+    logging.info("============= Macro accuracies =============")
+    macro_metrics = kg_presence_evaluator.evaluate_macro()
+    for slot in macro_metrics:
+        accuracy = macro_metrics[slot]["accuracy"]
+        error = macro_metrics[slot]["error"]
+        logging.info(f"{slot}={accuracy} +/- {error}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Out-of-Knowledge graph inference.")
+    parser.add_argument(
+        "--slot_linking_experiment_path",
+        type=str,
+        required=True,
+        help="Path to the OIE pre-ranker experiment.",
+    )
+    parser.add_argument("--determiner_threshold", type=float, required=False)
+    parser.add_argument("--determiner", type=str, required=True)
+    parser.add_argument("--opts", nargs=argparse.REMAINDER)
+    args = parser.parse_args()
+    cfg = get_cfg_defaults()
+    cfg.merge_from_file(pjoin(args.slot_linking_experiment_path, "config.yaml"))
+    if args.opts:
+        cfg.merge_from_list(args.opts)
+    # Prepare data, devices, etc.
+    cfg, test_loader, wikidata, device = prepare(cfg)
+    # No indexer is updated during inference
+    cfg.freeze()
+    # Start training
+    inference(cfg, test_loader, wikidata, device, args)
+
+
+if __name__ == "__main__":
+    main()
