@@ -37,11 +37,11 @@ git lfs pull
 
 ### Benchmark Datasets
 
-The benchmark dataset will be released as soon as we get an approval from our legal team.
+The datasets are released with the same license as this repository. You can find our data [here](https://huggingface.co/datasets/gorjanradevski/oie-knowledge-graph-linking).
 
-### Wikidata KG embeddings
+### Wikidata Knowledge Graph embeddings
 
-The Wikidata KG embeddings are needed for inference, and will be released with the models.
+The Wikidata Knowledge Graph embeddings are needed for inference, and will be released with the models.
 
 ## Inference
 
@@ -62,10 +62,9 @@ python src/train-slot-linking.py --config_path "configs/preranker.yaml"
 
 In order to modify any of the `config.yaml` values provide `--opts ...` after the `config_path` as: `--opts BATCH_SIZE 128 NUM_WORKERS 12 ...`.
  
-
 ## License
 
-...
+Please see the license file.
 
 ## Citation
 
