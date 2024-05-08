@@ -33,7 +33,7 @@ git lfs pull
 
 ## Benchmark Datasets
 
-The datasets are released with the same license as [REBEL](https://huggingface.co/datasets/Babelscape/rebel-dataset). You can find our data [here](https://huggingface.co/datasets/gorjanradevski/FaLB).
+The datasets are released with the same license as [REBEL](https://huggingface.co/datasets/Babelscape/rebel-dataset). You can find our data [here](https://huggingface.co/datasets/gorjanradevski/FaLB/tree/main).
 
 ### Wikidata Knowledge Graph embeddings
 
