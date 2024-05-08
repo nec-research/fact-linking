@@ -19,13 +19,9 @@ The models that will be released soon are:
 | OIE-Fact re-ranker | REBEL | [Link](#) |
 | OIE pre-ranker | SynthIE | [Link](#) |
 
-note that we are currently waiting for an approval of our legal team before the release.
+note that we are currently waiting for an approval of our legal team before the release. Please reach out via to some of the authors and we can provide temporary access.
 
-## Downloading and preparing the data
-
-In order to be able to run experiments - train new models, or peform inference with existing ones - the data has to be either downloaded or re-created.
-
-### Wikidata Dump
+## Wikidata Dump
 
 Downloading and processing Wikidata takes a while, and for that reason we release a `.json` file dump of Wikidata. After cloning the repository, you can obtain the processed version of Wikidata inside the `data/wikidata` directory as:
 
@@ -35,13 +31,13 @@ git lfs install
 git lfs pull
 ```
 
-### Benchmark Datasets
+## Benchmark Datasets
 
-The datasets are released with the same license as this repository. You can find our data [here](https://huggingface.co/datasets/gorjanradevski/oie-knowledge-graph-linking).
+The datasets are released with the same license as [REBEL](https://huggingface.co/datasets/Babelscape/rebel-dataset). You can find our data [here](https://huggingface.co/datasets/gorjanradevski/FaLB).
 
 ### Wikidata Knowledge Graph embeddings
 
-The Wikidata Knowledge Graph embeddings are needed for inference, and will be released with the models.
+The Wikidata Knowledge Graph embeddings are needed for inference, and will be released with the models. Similarly, reach out to some of the authors via email and we can provide you with the embeddings.
 
 ## Inference
 
@@ -60,7 +56,7 @@ Training new models also assumes that the environment is activated, and that the
 python src/train-slot-linking.py --config_path "configs/preranker.yaml"
 ```
 
-In order to modify any of the `config.yaml` values provide `--opts ...` after the `config_path` as: `--opts BATCH_SIZE 128 NUM_WORKERS 12 ...`.
+In order to modify any of the `config.yaml` values provide `--opts ...` after the `config_path` as: `--opts BATCH_SIZE 128 NUM_WORKERS 12 ...
  
 ## License
 
